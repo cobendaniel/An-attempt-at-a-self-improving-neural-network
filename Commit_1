@@ -1,0 +1,400 @@
+import pandas as pd 
+import numpy as np 
+import time 
+import os 
+import datetime as dt
+from os import listdir
+
+from sklearn.model_selection import train_test_split 
+import tensorflow as tf 
+from tensorflow.keras.optimizers import SGD, Adam, Adadelta, Adagrad, Adamax, Nadam, Ftrl
+import keras
+from keras_tuner import RandomSearch
+from tensorflow.keras import callbacks
+
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import classification_report, r2_score, accuracy_score 
+scaler = MinMaxScaler()
+
+from proc_freq import *
+
+df_list = [pd.read_csv(i) for i in listdir(os.getcwd()) if ".csv" in i and "loan_data" in i]
+
+df = df_list[0][[i for i in df_list[0].columns if "Unnamed" not in i]]
+df = df.select_dtypes(exclude = ["object"]).drop(columns = ["id", "member_id"])
+
+for i in df.columns:
+    df[i] = df[i].fillna(df[i].median())
+
+bracket_list_1 = list(range(0, 250000, 50000))
+bracket_list_2 = [i + 50000 for i in bracket_list_1]
+
+for (a, b) in zip(bracket_list_1, bracket_list_2):
+    df.loc[(df["annual_inc"] > a) & (df["annual_inc"] <= b), "income_bracket"] = f"Less_than_{b}"
+
+df.loc[df["annual_inc"] > 200000, "income_bracket"] = "More_than_200000"
+    
+df = df.drop(columns = ["annual_inc"])
+
+X_data = df[[i for i in df.columns if "income_bracket" not in i]]
+
+new_df_2 = pd.DataFrame(X_data.isna().sum()).reset_index()
+X_data = X_data.drop(columns = list(new_df_2[new_df_2[0] != 0]["index"]))
+
+y_data = df[["income_bracket"]]
+
+X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, random_state = 42)
+
+def drop_corr(df, x_train, x_val, drop_vars):
+    corr_mat = df[drop_vars].corr()
+
+    corr_feats = set()
+    for i in range(len(corr_mat.columns)):
+        for j in range(i):
+            if abs(corr_mat.iloc[i, j]) > 0.7:
+                colname = corr_mat.columns[i]
+                corr_feats.add(colname)
+
+    x_train = x_train.drop(columns = corr_feats)
+    x_val = x_val.drop(columns = corr_feats)
+
+    result_list = [x_train, x_val, corr_feats]
+    result_keys = ["X_train", "X_test", "dropped_vars"]
+    result_dict = dict(zip(result_keys, result_list))
+
+    return result_dict
+
+new_df = drop_corr(df, X_train, X_test, list(X_data.columns))
+
+X_train = new_df["X_train"]
+X_test = new_df["X_test"]
+
+X_train_1 = scaler.fit_transform(X_train)
+X_test_1 = scaler.transform(X_test)
+
+y_train_1 = pd.get_dummies(y_train["income_bracket"])
+y_test_1 = pd.get_dummies(y_test["income_bracket"])
+
+input_list = [keras.layers.Input(shape = (227), name = f"input_layer_{i}") for i in range(1, 6)]
+
+attempt_num = 0
+accuracy = 0 
+unique_numbers = 0
+
+activation_list = ["relu", "elu"]
+
+attempt_list = []
+summary_list = []
+
+layer_num_lower_list = []
+layer_num_upper_list = []
+layer_num_list = []
+
+base_neuron_lower_list = []
+base_neuron_upper_list = []
+base_neuron_list = []
+
+neuron_combination_list = []
+activation_function_list = []
+
+neuron_diff_lower_list = []
+neuron_diff_upper_list = []
+neuron_difference_list = []
+
+batch_size_lower_list = []
+batch_size_upper_list = []
+batch_size_list = []
+
+beta_1_lower_list = []
+beta_1_upper_list = []
+beta_1_list = []
+
+beta_2_lower_list = []
+beta_2_upper_list = []
+beta_2_list = []
+
+learning_rate_lower_list = []
+learning_rate_upper_list = []
+learning_rate_list = []
+
+start_time_list = []
+end_time_list = []
+accuracy_list = []
+unique_classes_list = []
+
+dropout_size_lower_list = []
+dropout_size_upper_list = []
+dropout_size_list = []
+
+base_num_lower = 5
+base_num_upper = 11
+
+layer_num_lower = 3
+layer_num_upper = 17
+
+neuron_diff_lower = 1
+neuron_diff_upper = 11
+
+batch_size_lower = 16
+batch_size_upper = 33
+
+dropout_size_lower = 0.001
+dropout_size_upper = 0.1
+
+learning_rate_lower = 0.001
+learning_rate_upper = 0.011
+
+beta_1_lower = 0.5
+beta_1_upper = 1
+
+beta_2_lower = 0.9
+beta_2_upper = 1
+
+while True:
+    attempt_num += 1
+    attempt_list.append(f"Attempt_{attempt_num}")
+
+    activation_function_type = activation_list[np.random.randint(0, 2)]
+    activation_function_list.append(activation_function_type)
+    
+    base_num = np.random.randint(base_num_lower, base_num_upper)
+    base_neuron_lower_list.append(base_num_lower)
+    base_neuron_upper_list.append(base_num_upper)
+    base_neuron_list.append(base_num)
+
+    layer_num = np.random.randint(layer_num_lower, layer_num_upper)
+    layer_num_lower_list.append(layer_num_lower)
+    layer_num_upper_list.append(layer_num_upper)
+    layer_num_list.append(layer_num)
+
+    interval_value = np.random.randint(neuron_diff_lower, neuron_diff_upper)
+    neuron_diff_lower_list.append(neuron_diff_lower)
+    neuron_diff_upper_list.append(neuron_diff_upper)
+    neuron_difference_list.append(interval_value)
+
+    batch_size_num = np.random.randint(batch_size_lower, batch_size_upper)
+    batch_size_lower_list.append(batch_size_lower)
+    batch_size_upper_list.append(batch_size_upper)
+    batch_size_list.append(batch_size_num)
+
+    dropout_size = np.random.randint(dropout_size_lower * 1000, dropout_size_upper * 1000) / 1000
+    dropout_size_lower_list.append(dropout_size_lower)
+    dropout_size_upper_list.append(dropout_size_upper)
+    dropout_size_list.append(dropout_size)
+    
+    num_list = sorted(list(range(base_num, base_num + (interval_value * layer_num), interval_value)), reverse = True)
+    num_list.append(0)
+
+    layers_1 = []
+    layers_2 = []
+    layers_3 = []
+    layers_4 = []
+    layers_5 = []
+
+    for (a, b) in enumerate(num_list):
+        if b == num_list[0]:
+            layers_1.append(keras.layers.Dense(b, name = f"Multi_1_{a + 1}")(input_list[0]))
+            layers_1.append(keras.layers.BatchNormalization()(layers_1[-1]))
+            layers_1.append(keras.layers.Activation(activation_function_type)(layers_1[-1]))
+            layers_1.append(keras.layers.Dropout(dropout_size)(layers_1[-1]))
+
+            layers_2.append(keras.layers.Dense(b, name = f"Multi_2_{a + 1}")(input_list[1]))
+            layers_2.append(keras.layers.BatchNormalization()(layers_2[-1]))
+            layers_2.append(keras.layers.Activation(activation_function_type)(layers_2[-1]))
+            layers_2.append(keras.layers.Dropout(dropout_size)(layers_2[-1]))
+
+            layers_3.append(keras.layers.Dense(b, name = f"Multi_3_{a + 1}")(input_list[2]))
+            layers_3.append(keras.layers.BatchNormalization()(layers_3[-1]))
+            layers_3.append(keras.layers.Activation(activation_function_type)(layers_3[-1]))
+            layers_3.append(keras.layers.Dropout(dropout_size)(layers_3[-1]))
+
+            layers_4.append(keras.layers.Dense(b, name = f"Multi_4_{a + 1}")(input_list[3]))
+            layers_4.append(keras.layers.BatchNormalization()(layers_4[-1]))
+            layers_4.append(keras.layers.Activation(activation_function_type)(layers_4[-1]))
+            layers_4.append(keras.layers.Dropout(dropout_size)(layers_4[-1]))
+
+            layers_5.append(keras.layers.Dense(b, name = f"Multi_5_{a + 1}")(input_list[4]))
+            layers_5.append(keras.layers.BatchNormalization()(layers_5[-1]))
+            layers_5.append(keras.layers.Activation(activation_function_type)(layers_5[-1]))
+            layers_5.append(keras.layers.Dropout(dropout_size)(layers_5[-1]))
+
+        elif b != num_list[0] and b != num_list[-1]:
+            layers_1.append(keras.layers.Dense(b, name = f"Multi_1_{a + 1}")(layers_1[-1]))
+            layers_1.append(keras.layers.BatchNormalization()(layers_1[-1]))
+            layers_1.append(keras.layers.Activation(activation_function_type)(layers_1[-1]))
+            layers_1.append(keras.layers.Dropout(dropout_size)(layers_1[-1]))
+
+            layers_2.append(keras.layers.Dense(b, name = f"Multi_2_{a + 1}")(layers_2[-1]))
+            layers_2.append(keras.layers.BatchNormalization()(layers_2[-1]))
+            layers_2.append(keras.layers.Activation(activation_function_type)(layers_2[-1]))
+            layers_2.append(keras.layers.Dropout(dropout_size)(layers_2[-1]))
+
+            layers_3.append(keras.layers.Dense(b, name = f"Multi_3_{a + 1}")(layers_3[-1]))
+            layers_3.append(keras.layers.BatchNormalization()(layers_3[-1]))
+            layers_3.append(keras.layers.Activation(activation_function_type)(layers_3[-1]))
+            layers_3.append(keras.layers.Dropout(dropout_size)(layers_3[-1]))
+
+            layers_4.append(keras.layers.Dense(b, name = f"Multi_4_{a + 1}")(layers_4[-1]))
+            layers_4.append(keras.layers.BatchNormalization()(layers_4[-1]))
+            layers_4.append(keras.layers.Activation(activation_function_type)(layers_4[-1]))
+            layers_4.append(keras.layers.Dropout(dropout_size)(layers_4[-1]))
+
+            layers_5.append(keras.layers.Dense(b, name = f"Multi_5_{a + 1}")(layers_5[-1]))
+            layers_5.append(keras.layers.BatchNormalization()(layers_5[-1]))
+            layers_5.append(keras.layers.Activation(activation_function_type)(layers_5[-1]))
+            layers_5.append(keras.layers.Dropout(dropout_size)(layers_5[-1]))
+
+        elif b == num_list[-1]:
+            layers_1.append(keras.layers.Dense(1, name = f"Output_1_{layer_num}", activation = "sigmoid")(layers_1[-1]))
+            layers_2.append(keras.layers.Dense(1, name = f"Output_2_{layer_num}", activation = "sigmoid")(layers_2[-1]))
+            layers_3.append(keras.layers.Dense(1, name = f"Output_3_{layer_num}", activation = "sigmoid")(layers_3[-1]))
+            layers_4.append(keras.layers.Dense(1, name = f"Output_4_{layer_num}", activation = "sigmoid")(layers_4[-1]))
+            layers_5.append(keras.layers.Dense(1, name = f"Output_5_{layer_num}", activation = "sigmoid")(layers_5[-1]))
+        
+    model = keras.Model(inputs = input_list, outputs = [layers_1[-1], layers_2[-1], layers_3[-1], layers_4[-1], layers_5[-1]])
+
+    learning_rate_num = np.random.randint(learning_rate_lower * 1000, learning_rate_upper * 1000) / 1000
+    learning_rate_lower_list.append(learning_rate_lower)
+    learning_rate_upper_list.append(learning_rate_upper)
+    learning_rate_list.append(learning_rate_num)
+
+    beta_value_1 = np.random.randint(beta_1_lower * 10, beta_1_upper * 10) / 10
+    beta_1_lower_list.append(beta_1_lower)
+    beta_1_upper_list.append(beta_1_upper)
+    beta_1_list.append(beta_value_1)
+
+    beta_value_2 = np.random.randint(beta_2_lower * 100, beta_2_upper * 100) / 100
+    beta_2_lower_list.append(beta_2_lower)
+    beta_2_upper_list.append(beta_2_upper)
+    beta_2_list.append(beta_value_2)
+
+    model.compile(
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate = learning_rate_num, 
+            beta_1 = beta_value_1, 
+            beta_2 = beta_value_2
+        ),
+        loss = [
+            keras.losses.BinaryCrossentropy() for i in range(5)
+        ],
+        metrics = ["accuracy"]
+    )
+
+    start_time_list.append(f"{dt.datetime.now()}"[0:16])
+
+    model.fit(
+        {
+            "input_layer_1" : X_train_1, 
+            "input_layer_2" : X_train_1, 
+            "input_layer_3" : X_train_1, 
+            "input_layer_4" : X_train_1, 
+            "input_layer_5" : X_train_1
+        },
+        {
+            f"Output_1_{layer_num}" : y_train_1[["Less_than_100000"]], 
+            f"Output_2_{layer_num}" : y_train_1[["Less_than_150000"]], 
+            f"Output_3_{layer_num}" : y_train_1[["Less_than_200000"]], 
+            f"Output_4_{layer_num}" : y_train_1[["Less_than_50000"]], 
+            f"Output_5_{layer_num}" : y_train_1[["More_than_200000"]]
+        },        
+        validation_data = (
+            {
+                "input_layer_1" : X_test_1, 
+                "input_layer_2" : X_test_1, 
+                "input_layer_3" : X_test_1, 
+                "input_layer_4" : X_test_1, 
+                "input_layer_5" : X_test_1
+            }, 
+            {
+                f"Output_1_{layer_num}" : y_test_1[["Less_than_100000"]], 
+                f"Output_2_{layer_num}" : y_test_1[["Less_than_150000"]], 
+                f"Output_3_{layer_num}" : y_test_1[["Less_than_200000"]], 
+                f"Output_4_{layer_num}" : y_test_1[["Less_than_50000"]], 
+                f"Output_5_{layer_num}" : y_test_1[["More_than_200000"]]
+            }
+        ),
+        epochs = 1, 
+        batch_size = batch_size_num, 
+        verbose = 1
+    )
+
+    end_time_list.append(f"{dt.datetime.now()}"[0:16])
+
+    predicted_df_1 = pd.DataFrame(model.predict([X_train for i in range(5)])[0], columns = ["Less_than_100000"])
+    predicted_df_2 = pd.DataFrame(model.predict([X_train for i in range(5)])[1], columns = ["Less_than_150000"])
+    predicted_df_3 = pd.DataFrame(model.predict([X_train for i in range(5)])[2], columns = ["Less_than_200000"])
+    predicted_df_4 = pd.DataFrame(model.predict([X_train for i in range(5)])[3], columns = ["Less_than_50000"])
+    predicted_df_5 = pd.DataFrame(model.predict([X_train for i in range(5)])[4], columns = ["More_than_200000"])
+
+    all_df = pd.concat([predicted_df_1, predicted_df_2, predicted_df_3, predicted_df_4, predicted_df_5], axis = 1)
+    all_df_1 = all_df.T.reset_index()
+    values = list(all_df_1["index"])
+
+    new_list_1 = []
+
+    for i in all_df_1.columns:
+        if i != "index":
+            column_1 = list(all_df_1[i])
+            index_value = column_1.index(max(column_1))
+            new_list_1.append(values[index_value])
+    
+    y_train["Predicted_Classes"] = new_list_1
+    y_train.loc[y_train["income_bracket"] == y_train["Predicted_Classes"], "Prediction_Accuracy"] = 1
+    y_train.loc[y_train["income_bracket"] != y_train["Predicted_Classes"], "Prediction_Accuracy"] = 0
+
+    accuracy = y_train["Prediction_Accuracy"].sum() / len(y_train) * 100
+    unique_numbers = y_train["Predicted_Classes"].nunique()
+
+    accuracy_list.append(accuracy)
+    unique_classes_list.append(unique_numbers)
+    neuron_combination_list.append(num_list[:-1])
+
+    if attempt_num % 1 == 0:
+        summary_table = pd.DataFrame({
+            "Attempt" : attempt_list,
+            "Accuracy" : accuracy_list, 
+            "Activation Function" : activation_function_list, 
+            "Unique Classes" : unique_classes_list, 
+            "Base Neurons" : base_neuron_list, 
+            "Number of Layers" : layer_num_list, 
+            "Interval Value" : neuron_difference_list, 
+            "Neuron Formation" : neuron_combination_list, 
+            "Batch Size" : batch_size_list, 
+            "Dropout Size" : dropout_size_list, 
+            "Learning Rate" : learning_rate_list, 
+            "Beta 1" : beta_1_list, 
+            "Beta 2" : beta_2_list
+        }).sort_values(by = ["Accuracy", "Unique Classes"], ascending = False)
+        summary_list.append(summary_table)
+
+        summary_table_2 = summary_table.iloc[0 : round(len(summary_table) * 0.1), :]
+
+        base_num_lower = summary_table_2["Base Neurons"].min()
+        base_num_upper = summary_table_2["Base Neurons"].max()
+
+        layer_num_lower = summary_table_2["Number of Layers"].min()
+        layer_num_upper = summary_table_2["Number of Layers"].max()
+
+        neuron_diff_lower = summary_table_2["Interval Value"].min()
+        neuron_diff_upper = summary_table_2["Interval Value"].max()
+
+        batch_size_lower = summary_table_2["Batch Size"].min()
+        batch_size_upper = summary_table_2["Batch Size"].max()
+
+        dropout_size_lower = summary_table_2["Dropout Size"].min()
+        dropout_size_upper = summary_table_2["Dropout Size"].max()
+
+        learning_rate_lower = summary_table_2["Learning Rate"].min()
+        learning_rate_upper = summary_table_2["Learning Rate"].max()
+
+        beta_1_lower = summary_table_2["Beta 1"].min()
+        beta_1_upper = summary_table_2["Beta 1"].max()
+
+        beta_2_lower = summary_table_2["Beta 2"].min()
+        beta_2_upper = summary_table_2["Beta 2"].max()
+    else:
+        pass
+
+    if accuracy >= 80 and unique_numbers == 5:
+        print("Optimized combination found")
+        break
