@@ -1,294 +1,159 @@
-class algorithmTuner:
-    activation_list = ["relu", "elu"]
+import pandas as pd 
+import numpy as np 
+import time 
+import os 
+import datetime as dt
+from sklearn.model_selection import train_test_split 
+import tensorflow as tf 
+from tensorflow.keras.optimizers import SGD, Adam, Adadelta, Adagrad, Adamax, Nadam, Ftrl
+import keras
+from tensorflow.keras import callbacks
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import classification_report, r2_score, accuracy_score, recall_score, precision_score, f1_score
+from proc_freq import proc_freq
+import tensorflow as tf
+import json
 
-    def __init__(self, dictionary):
-        self.layer_num = np.random.randint(dictionary["layer_num_lower"], dictionary["layer_num_upper"])
-        self.base_neurons = np.random.randint(dictionary["base_neuron_lower"], dictionary["base_neuron_upper"])
-        self.activation_function = algorithmTuner.activation_list[np.random.randint(0, 2)]
-        
-        self.learning_rate_lower = dictionary["learning_rate_lower"] * 1000
-        self.learning_rate_upper = dictionary["learning_rate_upper"] * 1000
-        self.learning_rate = np.random.randint(self.learning_rate_lower, self.learning_rate_upper) / 1000
+class neuralModeler_v2:
+    def constructor(self, dictionary: dict):
+        self.layer_num           = dictionary["layer_num"]
+        self.base_neurons        = dictionary["base_neurons"]
+        self.activation_function = dictionary["activation_function"]
+        self.learning_rate       = dictionary["learning_rate"]
+        self.dropout_size        = dictionary["dropout_size"]
+        self.neuron_difference   = dictionary["neuron_difference"]
+        self.batch_size          = dictionary["batch_size"]
+        self.epoch_count         = dictionary["epochs"]
+        self.beta_1_value        = dictionary["beta_1"]
+        self.beta_2_value        = dictionary["beta_2"]
+        self.verbose_yn          = dictionary["verbose_yn"]
+        self.final_activation    = dictionary["final_activation"]
+        self.input_shape         = dictionary["input_shape"]
+        self.patience            = dictionary["patience"]
 
-        self.dropout_lower = dictionary["dropout_lower"] * 1000
-        self.dropout_upper = dictionary["dropout_upper"] * 1000
-        self.dropout_size = np.random.randint(self.dropout_lower, self.dropout_upper) / 1000
+        self.early_stopping = keras.callbacks.EarlyStopping(
+            patience  = self.patience, 
+            min_delta = 0.001,
+            restore_best_weights = True
+        ) 
 
-        self.neuron_difference = np.random.randint(dictionary["neuron_difference_lower"], dictionary["neuron_difference_upper"])
-        self.batch_size = np.random.randint(dictionary["batch_size_lower"], dictionary["batch_size_upper"])
-        
-        self.beta_1_lower = dictionary["beta_1_lower"] * 10
-        self.beta_1_upper = dictionary["beta_1_upper"] * 10
-        self.beta_1_value = np.random.randint(self.beta_1_lower, self.beta_1_upper) / 10
+    def singleCreator(self, initial_bias: float = None, class_num: int = None):
+        if self.final_activation.lower()   == "sigmoid":
+            final_activation_function  = "sigmoid"
+            final_layer_num            = 1
+        elif self.final_activation.lower() == "softmax":
+            final_activation_function  = "softmax"
+            final_layer_num            = class_num
+        elif self.final_activation.lower() == "linear":
+            final_activation_function  = "linear"
+            final_layer_num            = 1
 
-        self.beta_2_lower = dictionary["beta_2_lower"] * 100
-        self.beta_2_upper = dictionary["beta_2_upper"] * 100
-        self.beta_2_value = np.random.randint(self.beta_2_lower, self.beta_2_upper) / 100
+        input_layer = keras.layers.Input(shape = (self.input_shape), name = f"Input_Layer")
 
-        self.epoch_count = dictionary["epochs"]
-        self.verbose_yn = dictionary["verbose_yn"]
-
-    def modelCreator(self, neuron_number):
-        self.neuron_number = neuron_number
-        self.input_list = [keras.layers.Input(shape = (self.neuron_number), name = f"input_layer_{i}") for i in range(1, 6)]
         self.num_list = sorted(list(range(self.base_neurons, self.base_neurons + (self.neuron_difference * self.layer_num), self.neuron_difference)), reverse = True)
         self.num_list.append(0)
 
-        self.layers_1 = []
-        self.layers_2 = []
-        self.layers_3 = []
-        self.layers_4 = []
-        self.layers_5 = []
+        layer_list = [input_layer]
 
         for (a, b) in enumerate(self.num_list):
-            if b == self.num_list[0]:
-                self.layers_1.append(keras.layers.Dense(b, name = f"Multi_1_{a + 1}")(self.input_list[0]))
-                self.layers_1.append(keras.layers.BatchNormalization()(self.layers_1[-1]))
-                self.layers_1.append(keras.layers.Activation(self.activation_function)(self.layers_1[-1]))
-                self.layers_1.append(keras.layers.Dropout(self.dropout_size)(self.layers_1[-1]))
+            layer_list.append(keras.layers.Dense(b)                            (layer_list[-1]))
+            layer_list.append(keras.layers.BatchNormalization()                (layer_list[-1]))
+            layer_list.append(keras.layers.Activation(self.activation_function)(layer_list[-1]))
+            layer_list.append(keras.layers.Dropout(self.dropout_size)          (layer_list[-1]))
 
-                self.layers_2.append(keras.layers.Dense(b, name = f"Multi_2_{a + 1}")(self.input_list[1]))
-                self.layers_2.append(keras.layers.BatchNormalization()(self.layers_2[-1]))
-                self.layers_2.append(keras.layers.Activation(self.activation_function)(self.layers_2[-1]))
-                self.layers_2.append(keras.layers.Dropout(self.dropout_size)(self.layers_2[-1]))
+        output_layer = keras.layers.Dense(final_layer_num, name = f"Output_Layer", activation = final_activation_function)(layer_list[-1]) 
+        self.model   = keras.Model(inputs = input_layer, outputs = output_layer)
 
-                self.layers_3.append(keras.layers.Dense(b, name = f"Multi_3_{a + 1}")(self.input_list[2]))
-                self.layers_3.append(keras.layers.BatchNormalization()(self.layers_3[-1]))
-                self.layers_3.append(keras.layers.Activation(self.activation_function)(self.layers_3[-1]))
-                self.layers_3.append(keras.layers.Dropout(self.dropout_size)(self.layers_3[-1]))
+        loss_dict = {
+            "sigmoid" : keras.losses.BinaryCrossentropy(),
+            "softmax" : keras.losses.CategoricalCrossentropy(),
+            "linear"  : "mean_squared_error"
+        }
 
-                self.layers_4.append(keras.layers.Dense(b, name = f"Multi_4_{a + 1}")(self.input_list[3]))
-                self.layers_4.append(keras.layers.BatchNormalization()(self.layers_4[-1]))
-                self.layers_4.append(keras.layers.Activation(self.activation_function)(self.layers_4[-1]))
-                self.layers_4.append(keras.layers.Dropout(self.dropout_size)(self.layers_4[-1]))
+        metrics_dict = {
+            "sigmoid" : tf.keras.metrics.BinaryAccuracy(),
+            "softmax" : tf.keras.metrics.CategoricalAccuracy(),
+            "linear"  : tf.keras.metrics.MeanAbsoluteError()
+        }
 
-                self.layers_5.append(keras.layers.Dense(b, name = f"Multi_5_{a + 1}")(self.input_list[4]))
-                self.layers_5.append(keras.layers.BatchNormalization()(self.layers_5[-1]))
-                self.layers_5.append(keras.layers.Activation(self.activation_function)(self.layers_5[-1]))
-                self.layers_5.append(keras.layers.Dropout(self.dropout_size)(self.layers_5[-1]))
-
-            elif b != self.num_list[0] and b != self.num_list[-1]:
-                self.layers_1.append(keras.layers.Dense(b, name = f"Multi_1_{a + 1}")(self.layers_1[-1]))
-                self.layers_1.append(keras.layers.BatchNormalization()(self.layers_1[-1]))
-                self.layers_1.append(keras.layers.Activation(self.activation_function)(self.layers_1[-1]))
-                self.layers_1.append(keras.layers.Dropout(self.dropout_size)(self.layers_1[-1]))
-
-                self.layers_2.append(keras.layers.Dense(b, name = f"Multi_2_{a + 1}")(self.layers_2[-1]))
-                self.layers_2.append(keras.layers.BatchNormalization()(self.layers_2[-1]))
-                self.layers_2.append(keras.layers.Activation(self.activation_function)(self.layers_2[-1]))
-                self.layers_2.append(keras.layers.Dropout(self.dropout_size)(self.layers_2[-1]))
-
-                self.layers_3.append(keras.layers.Dense(b, name = f"Multi_3_{a + 1}")(self.layers_3[-1]))
-                self.layers_3.append(keras.layers.BatchNormalization()(self.layers_3[-1]))
-                self.layers_3.append(keras.layers.Activation(self.activation_function)(self.layers_3[-1]))
-                self.layers_3.append(keras.layers.Dropout(self.dropout_size)(self.layers_3[-1]))
-
-                self.layers_4.append(keras.layers.Dense(b, name = f"Multi_4_{a + 1}")(self.layers_4[-1]))
-                self.layers_4.append(keras.layers.BatchNormalization()(self.layers_4[-1]))
-                self.layers_4.append(keras.layers.Activation(self.activation_function)(self.layers_4[-1]))
-                self.layers_4.append(keras.layers.Dropout(self.dropout_size)(self.layers_4[-1]))
-
-                self.layers_5.append(keras.layers.Dense(b, name = f"Multi_5_{a + 1}")(self.layers_5[-1]))
-                self.layers_5.append(keras.layers.BatchNormalization()(self.layers_5[-1]))
-                self.layers_5.append(keras.layers.Activation(self.activation_function)(self.layers_5[-1]))
-                self.layers_5.append(keras.layers.Dropout(self.dropout_size)(self.layers_5[-1]))
-                
-            elif b == self.num_list[-1]:
-                self.layers_1.append(keras.layers.Dense(1, name = f"Output_1_{self.layer_num}", activation = "sigmoid")(self.layers_1[-1]))
-                self.layers_2.append(keras.layers.Dense(1, name = f"Output_2_{self.layer_num}", activation = "sigmoid")(self.layers_2[-1]))
-                self.layers_3.append(keras.layers.Dense(1, name = f"Output_3_{self.layer_num}", activation = "sigmoid")(self.layers_3[-1]))
-                self.layers_4.append(keras.layers.Dense(1, name = f"Output_4_{self.layer_num}", activation = "sigmoid")(self.layers_4[-1]))
-                self.layers_5.append(keras.layers.Dense(1, name = f"Output_5_{self.layer_num}", activation = "sigmoid")(self.layers_5[-1]))
-        
-        self.model = keras.Model(inputs = self.input_list, outputs = [self.layers_1[-1], self.layers_2[-1], self.layers_3[-1], self.layers_4[-1], self.layers_5[-1]]) 
         self.model.compile(
             optimizer = tf.keras.optimizers.Adam(
-                learning_rate = self.learning_rate, 
-                beta_1 = self.beta_1_value, 
-                beta_2 = self.beta_2_value
+                learning_rate = self.learning_rate,
+                beta_1        = self.beta_1_value, 
+                beta_2        = self.beta_2_value
             ),
-            loss = [
-                keras.losses.BinaryCrossentropy() for i in range(5)
-            ], 
-            metrics = ["accuracy"]
+            loss    = loss_dict[final_activation_function],
+            metrics = metrics_dict[final_activation_function]
         )
 
         del self.num_list[-1]
-
-    def modelFitting(self, X_train, X_test, y_train, y_test):
+    
+    def modelFitter(self, X_train: pd.core.frame.DataFrame, X_test: pd.core.frame.DataFrame, y_train: pd.core.frame.DataFrame, y_test: pd.core.frame.DataFrame):
         self.X_train = X_train
-        self.X_test = X_test
+        self.X_test  = X_test
         self.y_train = y_train
-        self.y_test = y_test
+        self.y_test  = y_test
 
         self.start_time = f"{dt.datetime.now()}"[0:16]
 
-        self.model.fit(
-            {
-                "input_layer_1" : self.X_train,
-                "input_layer_2" : self.X_train, 
-                "input_layer_3" : self.X_train, 
-                "input_layer_4" : self.X_train, 
-                "input_layer_5" : self.X_train
-            }, 
-            {
-                f"Output_1_{self.layer_num}" : self.y_train[list(self.y_train.columns)[0]], 
-                f"Output_2_{self.layer_num}" : self.y_train[list(self.y_train.columns)[1]], 
-                f"Output_3_{self.layer_num}" : self.y_train[list(self.y_train.columns)[2]], 
-                f"Output_4_{self.layer_num}" : self.y_train[list(self.y_train.columns)[3]], 
-                f"Output_5_{self.layer_num}" : self.y_train[list(self.y_train.columns)[4]]
-            }, 
+        if self.y_train.shape[1] == 1:
+            callbacks_list = [self.early_stopping]
+        elif self.y_train.shape[1] > 1:
+            callbacks_list = [self.early_stopping for i in range(y_train.shape[1])]
+
+        self.history = self.model.fit(
+            {"Input_Layer"  : X_train},
+            {"Output_Layer" : y_train},
             validation_data = (
-                {
-                    "input_layer_1" : self.X_test, 
-                    "input_layer_2" : self.X_test, 
-                    "input_layer_3" : self.X_test, 
-                    "input_layer_4" : self.X_test, 
-                    "input_layer_5" : self.X_test
-                }, 
-                {
-                    f"Output_1_{self.layer_num}" : self.y_test[list(self.y_test.columns)[0]], 
-                    f"Output_2_{self.layer_num}" : self.y_test[list(self.y_test.columns)[1]], 
-                    f"Output_3_{self.layer_num}" : self.y_test[list(self.y_test.columns)[2]], 
-                    f"Output_4_{self.layer_num}" : self.y_test[list(self.y_test.columns)[3]], 
-                    f"Output_5_{self.layer_num}" : self.y_test[list(self.y_test.columns)[4]]
-                }            
+                {"Input_Layer"  : X_test},
+                {"Output_Layer" : y_test}
             ),
-            epochs = self.epoch_count, 
-            batch_size = self.batch_size, 
-            verbose = self.verbose_yn
+            epochs     = self.epoch_count, 
+            batch_size = self.batch_size,
+            callbacks  = callbacks_list,
+            verbose    = self.verbose_yn
         )
 
         self.end_time = f"{dt.datetime.now()}"[0:16]
 
-    def predictResults(self, X_data, y_data_1, y_data_2, target):
+        self.history_df = pd.DataFrame(self.history.history)
+
+    def modelResults(self, X_data: pd.core.frame.DataFrame, y_data: pd.core.frame.DataFrame, target:str):
         self.X_data = X_data
-        self.y_data_1 = y_data_1
-        self.y_data_2 = y_data_2
-        self.target = target
+        self.y_data = y_data
 
-        self.predicted_df_1 = pd.DataFrame(self.model.predict([self.X_data for i in range(5)])[0], columns = [list(self.y_data_2.columns)[0]])
-        self.predicted_df_2 = pd.DataFrame(self.model.predict([self.X_data for i in range(5)])[1], columns = [list(self.y_data_2.columns)[1]])
-        self.predicted_df_3 = pd.DataFrame(self.model.predict([self.X_data for i in range(5)])[2], columns = [list(self.y_data_2.columns)[2]])
-        self.predicted_df_4 = pd.DataFrame(self.model.predict([self.X_data for i in range(5)])[3], columns = [list(self.y_data_2.columns)[3]])
-        self.predicted_df_5 = pd.DataFrame(self.model.predict([self.X_data for i in range(5)])[4], columns = [list(self.y_data_2.columns)[4]])
+        pred_df = pd.DataFrame(self.model.predict(X_data), columns = ["Predicted Probability"])
+        pred_df["Actual Target"] = list(self.y_data[target])
 
-        self.all_df = pd.concat([self.predicted_df_1, self.predicted_df_2, self.predicted_df_3, self.predicted_df_4, self.predicted_df_5], axis = 1)
-        self.all_df_1 = self.all_df.T.reset_index()
-        self.values = list(self.all_df_1["index"])
+        threshold_list = []
+        accuracy_list  = []
+        recall_list    = []
+        precision_list = []
+        f1_score_list  = []
+        rp_diff_list   = []
 
-        self.new_list_1 = []
+        for i in [j / 10 for j in range(1, 10)]:
+            pred_df.loc[pred_df["Predicted Probability"] >= i, "Predicted Target"] = 1
+            pred_df.loc[pred_df["Predicted Probability"]  < i, "Predicted Target"] = 0
 
-        for i in self.all_df_1.columns:
-            if i != "index":
-                self.column_1 = list(self.all_df_1[i])
-                self.index_value = self.column_1.index(max(self.column_1))
-                self.new_list_1.append(self.values[self.index_value])
+            threshold_list.append(i)
+            accuracy_list.append(accuracy_score(pred_df["Predicted Target"], pred_df["Actual Target"]))
+            recall_list.append(recall_score(pred_df["Predicted Target"], pred_df["Actual Target"]))
+            precision_list.append(precision_score(pred_df["Predicted Target"], pred_df["Actual Target"]))
+            f1_score_list.append(f1_score(pred_df["Predicted Target"], pred_df["Actual Target"]))
 
-        self.y_data_1["Predicted_Classes"] = self.new_list_1
-        self.y_data_1.loc[self.y_data_1[self.target] == self.y_data_1["Predicted_Classes"], "Prediction_Accuracy"] = 1
-        self.y_data_1.loc[self.y_data_1[self.target] != self.y_data_1["Predicted_Classes"], "Prediction_Accuracy"] = 0
+        performance_table = pd.DataFrame({
+            "Threshold" : threshold_list, 
+            "Accuracy"  : accuracy_list, 
+            "Recall"    : recall_list, 
+            "Precision" : precision_list, 
+            "F1 Score"  : f1_score_list, 
+            "RP Diff"   : [abs(a - b) for (a, b) in zip(recall_list, precision_list)]
+        })
 
-        self.accuracy = self.y_data_1["Prediction_Accuracy"].sum() / len(self.y_data_1) * 100
-        self.unique_numbers = self.y_data_1["Predicted_Classes"].nunique()
-
-attempt_num = 0
-
-dropout_size_list = []
-attempt_list = []
-
-accuracy_list = []
-summary_list = []
-
-layer_num_list = []
-base_neuron_list = []
-
-neuron_combination_list = []
-activation_function_list = []
-
-neuron_difference_list = []
-batch_size_list = []
-
-beta_1_list = []
-beta_2_list = []
-
-learning_rate_list = []
-unique_classes_list = []
-
-while True:
-    ag = algorithmTuner(neural_dict)
-    ag.modelCreator(X_train.shape[1])
-    ag.modelFitting(X_train_1, X_test_1, y_train_1, y_test_1)
-    ag.predictResults(X_train_1, y_train, y_train_1, "income_bracket")
-
-    attempt_num += 1
-
-    attempt_list.append(f"Attempt_{attempt_num}")
-    accuracy_list.append(ag.accuracy)
-    
-    layer_num_list.append(ag.num_list)
-    base_neuron_list.append(ag.base_neurons)
-    
-    neuron_combination_list.append(ag.num_list)
-    activation_function_list.append(ag.activation_function)
-    
-    neuron_difference_list.append(ag.neuron_difference)
-    batch_size_list.append(ag.batch_size)
-    
-    beta_1_list.append(ag.beta_1_value)
-    beta_2_list.append(ag.beta_2_value)
-
-    learning_rate_list.append(ag.learning_rate)
-    unique_classes_list.append(ag.unique_numbers)
-
-    dropout_size_list.append(ag.dropout_size)
-
-    if attempt_num % 50 == 0:
-        summary_table = pd.DataFrame({
-            "Attempt" : attempt_list,
-            "Accuracy" : accuracy_list, 
-            "Activation Function" : activation_function_list, 
-            "Unique Classes" : unique_classes_list, 
-            "Base Neurons" : base_neuron_list, 
-            "Number of Layers" : layer_num_list, 
-            "Interval Value" : neuron_difference_list, 
-            "Neuron Formation" : neuron_combination_list, 
-            "Batch Size" : batch_size_list, 
-            "Dropout Size" : dropout_size_list, 
-            "Learning Rate" : learning_rate_list, 
-            "Beta 1" : beta_1_list, 
-            "Beta 2" : beta_2_list
-        }).sort_values(by = ["Accuracy", "Unique Classes"], ascending = False)
-
-        summary_list.append(summary_table)
-        summary_table_2 = summary_table.iloc[0 : round(len(summary_table) * 0.1), :]
-        
-        neural_dict["layer_num_lower"] = summary_table_2["Number of Layers"].min()
-        neural_dict["layer_num_upper"] = summary_table_2["Number of Layers"].max()
-
-        neural_dict["base_neuron_lower"] = summary_table_2["Base Neurons"].min()
-        neural_dict["base_neuron_upper"] = summary_table_2["Base Neurons"].max()
-
-        neural_dict["learning_rate_lower"] = summary_table_2["Learning Rate"].min()
-        neural_dict["learning_rate_upper"] = summary_table_2["Learning Rate"].max()
-
-        neural_dict["dropout_lower"] = summary_table_2["Dropout Size"].min()
-        neural_dict["dropout_upper"] = summary_table_2["Dropout Size"].max()
-
-        neural_dict["neuron_difference_lower"] = summary_table_2["Interval Value"].min()
-        neural_dict["neuron_difference_upper"] = summary_table_2["Interval Value"].max()
-
-        neural_dict["batch_size_lower"] = summary_table_2["Batch Size"].min()
-        neural_dict["batch_size_upper"] = summary_table_2["Batch Size"].max()
-
-        neural_dict["beta_1_lower"] = summary_table_2["Beta 1"].min()
-        neural_dict["beta_1_upper"] = summary_table_2["Beta 1"].max()
-
-        neural_dict["beta_2_lower"] = summary_table_2["Beta 2"].min()
-        neural_dict["beta_2_upper"] = summary_table_2["Beta 2"].max()
-    else:
-        pass
-
-    if attempt_num == 200:
-        print("Operation terminated")
-        break
+        self.performance_table = performance_table[performance_table["F1 Score"] != 0].sort_values(by = ["RP Diff"]).reset_index(drop = True)
+        self.bestThreshold     = list(self.performance_table["Threshold"])[0]
+        self.bestAccuracy      = list(self.performance_table["Accuracy"])[0]
+        self.bestRecall        = list(self.performance_table["Recall"])[0]
+        self.bestPrecision     = list(self.performance_table["Precision"])[0]
+        self.bestF1Score       = list(self.performance_table["F1 Score"])[0]
